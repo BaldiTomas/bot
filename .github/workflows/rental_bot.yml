@@ -34,4 +34,4 @@ jobs:
           git config user.email "actions@github.com"
           git add seen_properties.json
           git commit -m "Update seen properties" || echo "No changes"
-          git push
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/BaldiTomas/bot.git HEAD:main
