@@ -4,6 +4,7 @@
 import os
 import time
 import json
+import re
 import requests
 from bs4 import BeautifulSoup
 import smtplib
@@ -11,13 +12,15 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # ---------------- CONFIG ---------------- #
-SEEN_FILE = "/app/data/seen_properties.json"
+SEEN_FILE = "/app/data/seen_properties.json"  # Directorio persistente en Railway / Docker
 
 EMAIL = os.getenv("EMAIL_USER")
 PASSWORD = os.getenv("EMAIL_PASS")
 TO_EMAIL = os.getenv("TO_EMAIL")
 
-PARARIUS_URL = "https://www.pararius.com/apartments/utrecht"  # Cambiá la ciudad si querés
+PARARIUS_URL = "https://www.pararius.com/apartments/utrecht"  # Cambiar ciudad si se desea
+MIN_PRICE = int(os.getenv("MIN_PRICE", 1000))
+MAX_PRICE = int(os.getenv("MAX_PRICE", 1500))
 
 # ---------------- FUNCIONES ---------------- #
 def load_seen():
@@ -30,7 +33,17 @@ def save_seen(seen):
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
         json.dump(list(seen), f, indent=2)
 
+def parse_price(price_text):
+    """Convierte un string de precio en int. Retorna None si no se puede parsear."""
+    match = re.search(r"€\s*([\d,.]+)", price_text)
+    if match:
+        return int(match.group(1).replace(".", "").replace(",", ""))
+    return None
+
 def send_email(properties):
+    if not properties:
+        return
+
     msg = MIMEMultipart()
     msg["From"] = EMAIL
     msg["To"] = TO_EMAIL
@@ -83,11 +96,16 @@ def scrape():
                 continue
 
             title = title_tag.get_text(strip=True) if title_tag else "Departamento"
-            price = price_tag.get_text(strip=True)
+            price_text = price_tag.get_text(strip=True)
+            price_val = parse_price(price_text)
+
+            # 🔹 Saltear propiedades sin precio o fuera del rango
+            if price_val is None or not (MIN_PRICE <= price_val <= MAX_PRICE):
+                continue
 
             new_props.append({
                 "title": title,
-                "price": price,
+                "price": price_text,
                 "url": url
             })
             seen_this_run.add(url)
@@ -96,6 +114,7 @@ def scrape():
             send_email(new_props)
             seen.update(seen_this_run)
             save_seen(seen)
+
         return new_props
 
     except Exception as e:
