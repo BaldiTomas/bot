@@ -12,15 +12,16 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # ---------------- CONFIG ---------------- #
-SEEN_FILE = "/app/data/seen_properties.json"  # Directorio persistente en Railway / Docker
+SEEN_FILE = "/app/data/seen_properties.json"  # Persistente en Railway/Docker
 
-EMAIL = os.getenv("EMAIL_USER")
-PASSWORD = os.getenv("EMAIL_PASS")
-TO_EMAIL = os.getenv("TO_EMAIL")
+EMAIL = os.getenv("EMAIL_USER")        # Tu Gmail
+PASSWORD = os.getenv("EMAIL_PASS")     # App Password de Gmail
+TO_EMAIL = os.getenv("TO_EMAIL")       # Destino
 
-PARARIUS_URL = "https://www.pararius.com/apartments/utrecht"  # Cambiar ciudad si se desea
+PARARIUS_URL = os.getenv("CITY_URL", "https://www.pararius.com/apartments/utrecht")
 MIN_PRICE = int(os.getenv("MIN_PRICE", 1000))
 MAX_PRICE = int(os.getenv("MAX_PRICE", 1500))
+SLEEP_MINUTES = int(os.getenv("SLEEP_MINUTES", 5))
 
 # ---------------- FUNCIONES ---------------- #
 def load_seen():
@@ -30,6 +31,7 @@ def load_seen():
     return set()
 
 def save_seen(seen):
+    os.makedirs(os.path.dirname(SEEN_FILE), exist_ok=True)
     with open(SEEN_FILE, "w", encoding="utf-8") as f:
         json.dump(list(seen), f, indent=2)
 
@@ -58,7 +60,6 @@ def send_email(properties):
         <a href="{p['url']}">Ver propiedad</a>
         </p><hr>
         """
-
     msg.attach(MIMEText(html, "html"))
 
     try:
@@ -99,7 +100,6 @@ def scrape():
             price_text = price_tag.get_text(strip=True)
             price_val = parse_price(price_text)
 
-            # 🔹 Saltear propiedades sin precio o fuera del rango
             if price_val is None or not (MIN_PRICE <= price_val <= MAX_PRICE):
                 continue
 
@@ -130,5 +130,5 @@ if __name__ == "__main__":
             print(f"✅ {len(new_properties)} nueva(s) propiedad(es) encontradas")
         else:
             print("ℹ️ Sin propiedades nuevas")
-        print("⏱ Esperando 5 minutos...")
-        time.sleep(300)  # 5 minutos
+        print(f"⏱ Esperando {SLEEP_MINUTES} minutos...")
+        time.sleep(SLEEP_MINUTES * 60)
