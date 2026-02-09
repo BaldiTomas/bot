@@ -23,9 +23,9 @@ jobs:
 
       - name: Run bot
         env:
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASS: ${{ secrets.EMAIL_PASS }}
-          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          EMAIL_USER: ${{ secrets.SENDER_EMAIL }}
+          EMAIL_PASS: ${{ secrets.EMAIL_PASSWORD }}
+          TO_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
         run: python rental_bot_test.py
 
       - name: Commit seen properties
