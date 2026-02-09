@@ -11,13 +11,14 @@ from datetime import datetime
 import json
 import re
 
-SENT_FILE = "sent_links.json"
+# ---------------- ARCHIVO DE ESTADO ---------------- #
+SENT_FILE = "seen_properties.json"
 
 # ---------------- CONFIG desde ENV ---------------- #
 EMAIL_CONFIG = {
     "sender_email": os.getenv("SENDER_EMAIL"),
     "receiver_email": os.getenv("RECEIVER_EMAIL"),
-    "password": os.getenv("PASSWORD"),
+    "password": os.getenv("EMAIL_PASSWORD"),
     "smtp_server": "smtp.gmail.com",
     "smtp_port": 465
 }
@@ -37,13 +38,16 @@ class RentalBotParariusEnv:
 
     def load_sent_links(self):
         if os.path.exists(SENT_FILE):
-            with open(SENT_FILE, "r", encoding="utf-8") as f:
-                return set(json.load(f))
+            try:
+                with open(SENT_FILE, "r", encoding="utf-8") as f:
+                    return set(json.load(f))
+            except Exception:
+                return set()
         return set()
 
     def save_sent_links(self):
         with open(SENT_FILE, "w", encoding="utf-8") as f:
-            json.dump(list(self.sent_links), f, indent=2)
+            json.dump(sorted(list(self.sent_links)), f, indent=2)
 
     def fetch_properties_pararius(self):
         url = f"https://www.pararius.com/apartments/{SEARCH_CONFIG['city']}"
@@ -57,6 +61,7 @@ class RentalBotParariusEnv:
         }
 
         print(f"🔍 Buscando Pararius: {url}")
+
         try:
             response = requests.get(url, headers=headers, timeout=20)
             if response.status_code != 200:
@@ -64,32 +69,57 @@ class RentalBotParariusEnv:
                 return []
 
             soup = BeautifulSoup(response.text, "html.parser")
-            listings = soup.select("section.listing-search-item")
+
+            listings = soup.select(
+                "section.listing-search-item, li.search-list__item--listing"
+            )
+
             properties = []
 
             for item in listings:
-                link_tag = item.select_one("a.listing-search-item__link")
-                price_tag = item.select_one(".listing-search-item__price")
-                title_tag = item.select_one(".listing-search-item__title")
+                link_tag = item.select_one("a[href]")
+                price_tag = item.select_one(
+                    ".listing-search-item__price, .listing-price"
+                )
+                title_tag = item.select_one(
+                    ".listing-search-item__title, h2"
+                )
 
                 if not link_tag or not price_tag:
                     continue
 
-                url_prop = "https://www.pararius.com" + link_tag["href"]
+                url_prop = link_tag["href"]
+                if not url_prop.startswith("http"):
+                    url_prop = "https://www.pararius.com" + url_prop
+
                 if url_prop in self.sent_links:
                     continue
 
-                price_match = re.search(r"€\s?([\d,.]+)", price_tag.text)
+                price_match = re.search(r"€\s?([\d.,]+)", price_tag.text)
                 if not price_match:
                     continue
-                price_val = int(price_match.group(1).replace(".", "").replace(",", ""))
-                if not (SEARCH_CONFIG["min_price"] <= price_val <= SEARCH_CONFIG["max_price"]):
+
+                price_val = int(
+                    price_match.group(1)
+                    .replace(".", "")
+                    .replace(",", "")
+                )
+
+                if not (
+                    SEARCH_CONFIG["min_price"]
+                    <= price_val
+                    <= SEARCH_CONFIG["max_price"]
+                ):
                     continue
 
-                title = title_tag.text.strip() if title_tag else "Departamento"
+                title = (
+                    title_tag.text.strip()
+                    if title_tag else "Departamento"
+                )
+
                 properties.append({
                     "title": title,
-                    "price": f"€{price_val}",
+                    "price": f"€ {price_val}",
                     "location": SEARCH_CONFIG["city"].title(),
                     "url": url_prop,
                     "source": "Pararius",
@@ -109,47 +139,71 @@ class RentalBotParariusEnv:
             return
 
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"🏠 {len(self.new_properties)} nuevas propiedades en {SEARCH_CONFIG['city'].title()}"
+        msg["Subject"] = (
+            f"🏠 {len(self.new_properties)} nuevas propiedades en "
+            f"{SEARCH_CONFIG['city'].title()}"
+        )
         msg["From"] = EMAIL_CONFIG["sender_email"]
         msg["To"] = EMAIL_CONFIG["receiver_email"]
 
         html = "<h2>🏠 Nuevas propiedades encontradas</h2><hr>"
+
         for p in self.new_properties:
             html += f"""
             <p>
-            <strong>{p['title']}</strong> ({p['source']})<br>
-            Precio: {p['price']}<br>
-            <a href="{p['url']}">Ver propiedad</a>
-            </p><hr>
+                <strong>{p['title']}</strong><br>
+                Precio: {p['price']}<br>
+                Fuente: {p['source']}<br>
+                <a href="{p['url']}">Ver propiedad</a>
+            </p>
+            <hr>
             """
 
         msg.attach(MIMEText(html, "html"))
 
         print("📤 Enviando email...")
+
         try:
-            with smtplib.SMTP_SSL(EMAIL_CONFIG["smtp_server"], EMAIL_CONFIG["smtp_port"]) as server:
-                server.login(EMAIL_CONFIG["sender_email"], EMAIL_CONFIG["password"])
+            with smtplib.SMTP_SSL(
+                EMAIL_CONFIG["smtp_server"],
+                EMAIL_CONFIG["smtp_port"]
+            ) as server:
+                server.login(
+                    EMAIL_CONFIG["sender_email"],
+                    EMAIL_CONFIG["password"]
+                )
                 server.send_message(msg)
+
         except Exception as e:
             print(f"❌ Error enviando email: {e}")
             return
 
-        # Guardar links enviados
         for p in self.new_properties:
             self.sent_links.add(p["url"])
+
         self.save_sent_links()
         print("✅ Email enviado correctamente")
 
     def run(self):
-        print("="*50)
+        print("=" * 60)
         print("🏠 BOT DE ALQUILERES (Pararius - ENV)")
-        print(f"📍 Ciudad: {SEARCH_CONFIG['city'].title()} | Rango: €{SEARCH_CONFIG['min_price']} - €{SEARCH_CONFIG['max_price']}")
-        print("="*50)
+        print(
+            f"📍 Ciudad: {SEARCH_CONFIG['city'].title()} | "
+            f"Rango: €{SEARCH_CONFIG['min_price']} - "
+            f"€{SEARCH_CONFIG['max_price']}"
+        )
+        print("=" * 60)
 
         self.new_properties = self.fetch_properties_pararius()
+
+        if not self.new_properties:
+            print("ℹ️ No hay propiedades nuevas. Fin.")
+            return
+
         self.send_email()
+
         print("🏁 Ejecución finalizada")
-        print("="*50)
+        print("=" * 60)
 
 
 if __name__ == "__main__":
